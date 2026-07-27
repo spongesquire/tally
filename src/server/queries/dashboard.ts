@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { schema } from "@/db/client";
-import { eq, and, isNull, desc, sql, ne } from "drizzle-orm";
+import { eq, and, isNull, desc, sql, ne, inArray } from "drizzle-orm";
 
 /**
  * Get all groups for the dashboard — active groups where the current user
@@ -50,7 +50,7 @@ export async function getDashboardGroups(userId: string) {
           .from(schema.groupMembers)
           .where(
             and(
-              sql`${schema.groupMembers.groupId} = ANY(${groupIds})`,
+              inArray(schema.groupMembers.groupId, groupIds),
               eq(schema.groupMembers.status, "active")
             )
           )

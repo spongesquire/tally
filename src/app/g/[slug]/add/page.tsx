@@ -1,12 +1,12 @@
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/server/auth/session";
 import { getGroupBySlug } from "@/server/queries/dashboard";
-import { getExpenses } from "@/server/queries/expenses";
-import { GroupOverview } from "@/components/groups/group-overview";
+import { getCategories } from "@/server/queries/expenses";
+import { AddExpenseForm } from "@/components/expenses/add-expense-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function GroupPage({
+export default async function AddExpensePage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -18,14 +18,14 @@ export default async function GroupPage({
   const data = await getGroupBySlug(slug, session.userId);
   if (!data) notFound();
 
-  const expenses = await getExpenses(data.group.id);
+  const categories = await getCategories(data.group.id);
 
   return (
-    <GroupOverview
+    <AddExpenseForm
       group={data.group}
       currentUserMember={data.currentUserMember}
       members={data.members}
-      expenses={expenses}
+      categories={categories}
     />
   );
 }

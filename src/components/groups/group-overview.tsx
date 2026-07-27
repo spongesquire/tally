@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Avatar, AvatarStack, netStatus } from "@/components/shared/ui";
+import { Avatar, AvatarStack, netStatus, formatDateShort, formatUnsigned } from "@/components/shared/ui";
 
 interface Member {
   id: string;
@@ -22,14 +22,30 @@ interface GroupData {
   status: string;
 }
 
+interface ExpenseRow {
+  id: string;
+  description: string;
+  totalMinor: number;
+  currency: string;
+  expenseDate: Date | string;
+  splitMethod: string;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  createdByMemberId: string;
+  creatorName: string | null;
+  status: string;
+}
+
 export function GroupOverview({
   group,
   currentUserMember,
   members,
+  expenses = [],
 }: {
   group: GroupData;
   currentUserMember: Member;
   members: Member[];
+  expenses?: ExpenseRow[];
 }) {
   const [showInvitePanel, setShowInvitePanel] = useState(false);
   const status = netStatus(0);
@@ -110,25 +126,53 @@ export function GroupOverview({
           ))}
         </div>
 
-        {/* Expenses empty state */}
-        <div className="text-center py-16">
-          <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-[var(--surface-2)] flex items-center justify-center">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.5">
-              <rect x="3" y="6" width="18" height="13" rx="2" />
-              <path d="M3 10h18" />
-            </svg>
+        {/* Expenses list */}
+        {expenses.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-[var(--surface-2)] flex items-center justify-center">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.5">
+                <rect x="3" y="6" width="18" height="13" rx="2" />
+                <path d="M3 10h18" />
+              </svg>
+            </div>
+            <p className="text-[var(--text-2)] text-sm">No expenses yet. Add the first one.</p>
           </div>
-          <p className="text-[var(--text-2)] text-sm">No expenses yet. Add the first one.</p>
-        </div>
+        ) : (
+          <div className="space-y-2">
+            {expenses.map((exp) => (
+              <Link
+                key={exp.id}
+                href={`/g/${group.slug}/expenses/${exp.id}`}
+                className="block p-3.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  {exp.categoryIcon && <span className="text-lg">{exp.categoryIcon}</span>}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{exp.description}</p>
+                    <p className="text-xs text-[var(--text-2)]">
+                      {exp.creatorName} paid · {formatDateShort(exp.expenseDate)}
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold tnum">
+                    {formatUnsigned(exp.totalMinor, exp.currency)}
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Floating Add Expense button */}
-      <button className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3.5 rounded-full bg-[var(--primary)] text-[var(--primary-fg)] font-medium shadow-lg hover:bg-[var(--primary-hover)] transition-all active:scale-[0.98] flex items-center gap-2 z-10">
+      <Link
+        href={`/g/${group.slug}/add`}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3.5 rounded-full bg-[var(--primary)] text-[var(--primary-fg)] font-medium shadow-lg hover:bg-[var(--primary-hover)] transition-all active:scale-[0.98] flex items-center gap-2 z-10"
+      >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M12 5v14M5 12h14" />
         </svg>
         Add expense
-      </button>
+      </Link>
     </div>
   );
 }
