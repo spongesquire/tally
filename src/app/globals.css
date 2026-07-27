@@ -1,26 +1,164 @@
 @import "tailwindcss";
 
+/* ════════════════════════════════════════════════════════════
+   TALLY — Design Tokens
+   Warm off-white canvas, green-tinted ink, forest green primary.
+   Per design-system skill: near-black/near-white, saturated neutrals,
+   single accent, category colours, no rainbow.
+   ════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Surfaces — warm off-white with slight green tint ── */
+  --bg: #F8FAF9;              /* page background — warm off-white */
+  --surface: #FFFFFF;         /* cards, elevated surfaces */
+  --surface-2: #F0F4F2;       /* subtle fills, input backgrounds */
+
+  /* ── Text — near-black, green-tinted ── */
+  --text: #1A2B22;            /* primary text — near-black green-tinted */
+  --text-2: #5C6B65;          /* secondary, metadata */
+  --text-3: #94A39C;          /* placeholders, disabled */
+
+  /* ── Borders — quiet grey-green ── */
+  --border: #E1E8E4;          /* default borders */
+  --border-strong: #C8D4CE;   /* emphasised borders */
+
+  /* ── Accent — forest green primary ── */
+  --primary: #2E7D32;         /* forest green */
+  --primary-hover: #256628;
+  --primary-fg: #FFFFFF;
+
+  /* ── Semantic colours ── */
+  --success: #2E7D32;         /* positive, owed to you */
+  --danger: #C62828;          /* negative, you owe */
+  --warning: #E65100;         /* amber for warnings */
+  --info: #1565C0;            /* informational */
+
+  /* ── Lightness tokens ── */
+  --positive-bg: #E8F5E9;     /* soft green background */
+  --negative-bg: #FFEBEE;     /* soft red background */
+  --warning-bg: #FFF3E0;      /* soft amber background */
+
+  /* ── Radius ── */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ── Motion ── */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ── Shadows (light mode only) ── */
+  --shadow-sm: 0 1px 2px rgba(26, 43, 34, 0.04);
+  --shadow: 0 2px 8px rgba(26, 43, 34, 0.06);
+  --shadow-lg: 0 8px 24px rgba(26, 43, 34, 0.08);
+
+  /* ── Fonts ── */
+  --font-sans: var(--font-lexend), var(--font-source-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* ── Dark Mode — true black, OLED-friendly ── */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #000000;
+    --surface: #1A2420;           /* warm dark green-black */
+    --surface-2: #243029;
+    --text: #F0F4F2;
+    --text-2: #94A39C;
+    --text-3: #5C6B65;
+    --border: #2D3A33;
+    --border-strong: #43524A;
+    --primary: #4CAF50;           /* brighter green for dark */
+    --primary-hover: #66BB6A;
+    --primary-fg: #0A0F0C;
+    --success: #66BB6A;
+    --danger: #EF5350;
+    --warning: #FF9800;
+    --info: #42A5F5;
+    --positive-bg: #1B3326;
+    --negative-bg: #3D1E1E;
+    --warning-bg: #3D2E11;
+    /* No shadows in dark mode — use brightness/border contrast */
+    --shadow-sm: none;
+    --shadow: none;
+    --shadow-lg: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-text-secondary: var(--text-2);
+  --color-text-tertiary: var(--text-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-fg);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-positive-bg: var(--positive-bg);
+  --color-negative-bg: var(--negative-bg);
+  --color-warning-bg: var(--warning-bg);
+  --radius-sm: var(--radius-sm);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
+
+/* ── Base ── */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.005em;
+}
+
+/* ── Tabular numerals for all financial figures ── */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ── Focus visible ── */
+*:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Smooth transitions on interactive elements ── */
+button, a, input, textarea, select {
+  transition: background-color 150ms var(--ease-standard),
+              border-color 150ms var(--ease-standard),
+              color 150ms var(--ease-standard),
+              transform 100ms var(--ease-standard);
+}
+
+button:active, a:active {
+  transform: scale(0.98);
+}
+
+/* ── Scrollbar (subtle) ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
