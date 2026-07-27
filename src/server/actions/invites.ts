@@ -87,7 +87,10 @@ export async function createInvite(params: {
     expiresAt: null,
   });
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000");
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.VERCEL_URL ||
+    (process.env.NODE_ENV === "production" ? "https://tally-zeta-nine.vercel.app" : "http://localhost:3000");
   const link = `${baseUrl}/join/${token}`;
 
   return { ok: true, link };
