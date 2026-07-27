@@ -109,21 +109,25 @@ export function GroupOverview({
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-[var(--border)] mb-4">
-          {["Expenses", "Balances", "Activity"].map((tab, i) => (
-            <button
-              key={tab}
-              className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-                i === 0
-                  ? "text-[var(--primary)]"
-                  : "text-[var(--text-2)] hover:text-[var(--text)]"
-              }`}
-            >
-              {tab}
-              {i === 0 && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary)] rounded-full" />
-              )}
-            </button>
-          ))}
+          <Link
+            href={`/g/${group.slug}`}
+            className="px-4 py-2.5 text-sm font-medium transition-colors relative text-[var(--primary)]"
+          >
+            Expenses
+            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary)] rounded-full" />
+          </Link>
+          <Link
+            href={`/g/${group.slug}/balances`}
+            className="px-4 py-2.5 text-sm font-medium transition-colors relative text-[var(--text-2)] hover:text-[var(--text)]"
+          >
+            Balances
+          </Link>
+          <button
+            className="px-4 py-2.5 text-sm font-medium transition-colors relative text-[var(--text-2)] hover:text-[var(--text)]"
+            type="button"
+          >
+            Activity
+          </button>
         </div>
 
         {/* Expenses list */}

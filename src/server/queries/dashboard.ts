@@ -64,13 +64,23 @@ export async function getDashboardGroups(userId: string) {
     membersByGroup.set(m.groupId, list);
   }
 
-  return rows.map((r) => ({
-    ...r.group,
-    currentUserMember: r.member,
-    members: membersByGroup.get(r.group.id) ?? [],
-    // Net balance will be 0 for now — computed in Phase 5
-    userNet: 0,
-  }));
+  const groupsWithNets = await Promise.all(
+    rows.map(async (r) => ({
+      ...r.group,
+      currentUserMember: r.member,
+      members: membersByGroup.get(r.group.id) ?? [],
+      userNet: await computeUserNet(r.member.id, r.group.id),
+    }))
+  );
+  return groupsWithNets;
+}
+
+/** Quick net computation for dashboard display */
+async function computeUserNet(memberId: string, groupId: string): Promise<number> {
+  const { getGroupBalances } = await import("@/server/queries/balances");
+  const { balances } = await getGroupBalances(groupId);
+  const b = balances.find((x) => x.memberId === memberId);
+  return b?.net ?? 0;
 }
 
 /**
