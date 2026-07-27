@@ -48,7 +48,16 @@ export function GroupOverview({
   expenses?: ExpenseRow[];
 }) {
   const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [query, setQuery] = useState("");
   const status = netStatus(0);
+
+  const trimmedQuery = query.trim().toLowerCase();
+  const filteredExpenses = trimmedQuery
+    ? expenses.filter(
+        (e) =>
+          e.description.toLowerCase().includes(trimmedQuery)
+      )
+    : expenses;
 
   return (
     <div className="min-h-screen">
@@ -122,13 +131,49 @@ export function GroupOverview({
           >
             Balances
           </Link>
-          <button
+          <Link
+            href={`/g/${group.slug}/activity`}
             className="px-4 py-2.5 text-sm font-medium transition-colors relative text-[var(--text-2)] hover:text-[var(--text)]"
-            type="button"
           >
             Activity
-          </button>
+          </Link>
         </div>
+
+        {/* Search input */}
+        {expenses.length > 0 && (
+          <div className="relative mb-4">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--text-3)"
+              strokeWidth="1.75"
+              className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search expenses"
+              className="w-full pl-9 pr-3 py-2.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] text-sm focus:border-[var(--primary)] outline-none transition-colors"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-3)] hover:text-[var(--text)]"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Expenses list */}
         {expenses.length === 0 ? (
@@ -141,9 +186,21 @@ export function GroupOverview({
             </div>
             <p className="text-[var(--text-2)] text-sm">No expenses yet. Add the first one.</p>
           </div>
+        ) : filteredExpenses.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-[var(--text-2)] text-sm">
+              No expenses match “<span className="text-[var(--text)]">{query}</span>”.
+            </p>
+            <button
+              onClick={() => setQuery("")}
+              className="text-sm text-[var(--primary)] hover:underline mt-1"
+            >
+              Clear search
+            </button>
+          </div>
         ) : (
           <div className="space-y-2">
-            {expenses.map((exp) => (
+            {filteredExpenses.map((exp) => (
               <Link
                 key={exp.id}
                 href={`/g/${group.slug}/expenses/${exp.id}`}

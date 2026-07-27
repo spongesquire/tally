@@ -243,3 +243,222 @@ export async function saveExpenseAction(input: SaveExpenseInput): Promise<Expens
   revalidatePath(`/g/${input.groupSlug}`);
   return { ok: true, expenseId: result.id };
 }
+
+/**
+ * Soft-delete an expense.
+ *
+ * - Caller must be the creator or a group owner.
+ * - Sets status='deleted', deleted_at=now().
+ * - Captures a 'delete' revision snapshot + activity event atomically.
+ * - Never hard-deletes financial records.
+ */
+export async function removeExpenseAction(
+  expenseId: string,
+  memberId: string
+): Promise<ExpenseResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const expenseRows = await db
+    .select()
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, expenseId))
+    .limit(1);
+  if (expenseRows.length === 0) {
+    return { ok: false, error: "Expense not found", type: "not_found" };
+  }
+  const expense = expenseRows[0];
+
+  if (expense.status === "deleted") {
+    return { ok: false, error: "Expense is already deleted", type: "conflict" };
+  }
+
+  // Resolve caller's active member row in this group
+  const callerRows = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.id, memberId),
+        eq(schema.groupMembers.userId, session.userId),
+        eq(schema.groupMembers.groupId, expense.groupId),
+        eq(schema.groupMembers.status, "active")
+      )
+    )
+    .limit(1);
+  if (callerRows.length === 0) {
+    return { ok: false, error: "Not a member", type: "forbidden" };
+  }
+  const caller = callerRows[0];
+
+  // Authorisation: creator or owner only
+  const isCreator = expense.createdByMemberId === caller.id;
+  const isOwner = caller.role === "owner";
+  if (!isCreator && !isOwner) {
+    return { ok: false, error: "Only the creator or an owner can remove this expense", type: "forbidden" };
+  }
+
+  const nextVersion = expense.version + 1;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.expenses)
+      .set({
+        status: "deleted",
+        deletedAt: new Date(),
+        version: nextVersion,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.expenses.id, expense.id));
+
+    await tx.insert(schema.entityRevisions).values({
+      groupId: expense.groupId,
+      entityType: "expense",
+      entityId: expense.id,
+      version: nextVersion,
+      action: "delete",
+      snapshot: {
+        priorVersion: expense.version,
+        totalMinor: expense.totalMinor,
+        description: expense.description,
+      },
+      changedByMemberId: caller.id,
+    });
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: expense.groupId,
+      actorMemberId: caller.id,
+      entityType: "expense",
+      entityId: expense.id,
+      action: "deleted",
+      summaryPayload: {
+        summary: `${caller.displayName} removed "${expense.description}"`,
+        description: expense.description,
+        amount: expense.totalMinor,
+      },
+    });
+  });
+
+  // Resolve slug for revalidation
+  const groupRows = await db
+    .select({ slug: schema.groups.slug })
+    .from(schema.groups)
+    .where(eq(schema.groups.id, expense.groupId))
+    .limit(1);
+  const slug = groupRows[0]?.slug;
+  if (slug) {
+    revalidatePath(`/g/${slug}`);
+    revalidatePath(`/g/${slug}/balances`);
+    revalidatePath(`/g/${slug}/expenses/${expense.id}`);
+  }
+
+  return { ok: true, expenseId: expense.id };
+}
+
+/**
+ * Restore a soft-deleted expense.
+ *
+ * - Owner-only.
+ * - Sets status='active', deleted_at=null.
+ * - Records a 'restore' revision + activity event.
+ */
+export async function restoreExpenseAction(
+  expenseId: string,
+  memberId: string
+): Promise<ExpenseResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const expenseRows = await db
+    .select()
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, expenseId))
+    .limit(1);
+  if (expenseRows.length === 0) {
+    return { ok: false, error: "Expense not found", type: "not_found" };
+  }
+  const expense = expenseRows[0];
+
+  if (expense.status !== "deleted") {
+    return { ok: false, error: "Expense is not deleted", type: "conflict" };
+  }
+
+  // Resolve caller's active member row in this group
+  const callerRows = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.id, memberId),
+        eq(schema.groupMembers.userId, session.userId),
+        eq(schema.groupMembers.groupId, expense.groupId),
+        eq(schema.groupMembers.status, "active")
+      )
+    )
+    .limit(1);
+  if (callerRows.length === 0) {
+    return { ok: false, error: "Not a member", type: "forbidden" };
+  }
+  const caller = callerRows[0];
+
+  // Owner-only restore (per spec ACT-004)
+  if (caller.role !== "owner") {
+    return { ok: false, error: "Only an owner can restore deleted entries", type: "forbidden" };
+  }
+
+  const nextVersion = expense.version + 1;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.expenses)
+      .set({
+        status: "active",
+        deletedAt: null,
+        version: nextVersion,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.expenses.id, expense.id));
+
+    await tx.insert(schema.entityRevisions).values({
+      groupId: expense.groupId,
+      entityType: "expense",
+      entityId: expense.id,
+      version: nextVersion,
+      action: "restore",
+      snapshot: {
+        priorVersion: expense.version,
+        totalMinor: expense.totalMinor,
+        description: expense.description,
+      },
+      changedByMemberId: caller.id,
+    });
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: expense.groupId,
+      actorMemberId: caller.id,
+      entityType: "expense",
+      entityId: expense.id,
+      action: "restored",
+      summaryPayload: {
+        summary: `${caller.displayName} restored "${expense.description}"`,
+        description: expense.description,
+        amount: expense.totalMinor,
+      },
+    });
+  });
+
+  const groupRows = await db
+    .select({ slug: schema.groups.slug })
+    .from(schema.groups)
+    .where(eq(schema.groups.id, expense.groupId))
+    .limit(1);
+  const slug = groupRows[0]?.slug;
+  if (slug) {
+    revalidatePath(`/g/${slug}`);
+    revalidatePath(`/g/${slug}/balances`);
+    revalidatePath(`/g/${slug}/expenses/${expense.id}`);
+    revalidatePath(`/g/${slug}/activity`);
+  }
+
+  return { ok: true, expenseId: expense.id };
+}

@@ -5,7 +5,7 @@ import { schema } from "@/db/client";
 import { getSession } from "@/server/auth/session";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { PRODUCT, DEFAULT_CATEGORIES } from "@/lib/product-config";
 
 function slugify(name: string): string {
@@ -115,4 +115,200 @@ export async function createGroupAction(formData: FormData) {
 
   revalidatePath("/");
   redirect(`/g/${result.slug}`);
+}
+
+/**
+ * Update a group’s name and/or icon.
+ *
+ * - Owner-only (per spec GRP-002).
+ * - Records a revision snapshot + activity event.
+ */
+export async function updateGroupAction(input: {
+  groupSlug: string;
+  name?: string;
+  iconKey?: string | null;
+}): Promise<GroupActionResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const resolved = await resolveOwnerMember(input.groupSlug, session.userId);
+  if (!resolved.group) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  if (!resolved.member || resolved.code === "forbidden") {
+    return { ok: false, error: "Only an owner can edit this group", type: "forbidden" };
+  }
+  const group = resolved.group;
+  const caller = resolved.member;
+
+  const nextName = input.name?.trim().slice(0, 80) ?? null;
+  const nextIcon =
+    input.iconKey === undefined
+      ? undefined
+      : input.iconKey === null
+        ? null
+        : input.iconKey.trim().slice(0, 16) || null;
+  if (nextName === "") {
+    return { ok: false, error: "Group name cannot be empty", type: "validation" };
+  }
+
+  const setName = nextName ?? group.name;
+  const setIcon = nextIcon === undefined ? group.iconKey : nextIcon;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.groups)
+      .set({ name: setName, iconKey: setIcon, updatedAt: new Date() })
+      .where(eq(schema.groups.id, group.id));
+
+    await tx.insert(schema.entityRevisions).values({
+      groupId: group.id,
+      entityType: "group",
+      entityId: group.id,
+      version: 1,
+      action: "update",
+      snapshot: { name: setName, iconKey: setIcon },
+      changedByMemberId: caller.id,
+    });
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "group",
+      entityId: group.id,
+      action: "updated",
+      summaryPayload: { summary: `${caller.displayName} updated the group details` },
+    });
+  });
+
+  revalidatePath(`/g/${input.groupSlug}`);
+  revalidatePath(`/g/${input.groupSlug}/settings`);
+  return { ok: true, status: group.status };
+}
+
+export type GroupActionResult =
+  | { ok: true; status: string }
+  | { ok: false; error: string; type?: "validation" | "forbidden" | "not_found" | "conflict" };
+
+/**
+ * Resolve the caller's active owner member row for a group, or return null
+ * if the group doesn't exist or the caller is not an active owner.
+ */
+async function resolveOwnerMember(groupSlug: string, userId: string) {
+  const groups = await db
+    .select()
+    .from(schema.groups)
+    .where(eq(schema.groups.slug, groupSlug))
+    .limit(1);
+  if (groups.length === 0) return { group: null, member: null, code: "not_found" as const };
+  const group = groups[0];
+
+  const members = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.groupId, group.id),
+        eq(schema.groupMembers.userId, userId),
+        eq(schema.groupMembers.status, "active")
+      )
+    )
+    .limit(1);
+  if (members.length === 0) return { group, member: null, code: "forbidden" as const };
+  const member = members[0];
+  if (member.role !== "owner") return { group, member, code: "forbidden" as const };
+  return { group, member, code: "ok" as const };
+}
+
+/**
+ * Archive a group.
+ *
+ * - Owner-only (per spec GRP-003).
+ * - Sets status='archived', archived_at=now().
+ * - Records an activity event. Does not alter money or generate settlements.
+ */
+export async function archiveGroupAction(groupSlug: string): Promise<GroupActionResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const resolved = await resolveOwnerMember(groupSlug, session.userId);
+  if (!resolved.group) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  if (!resolved.member || resolved.code === "forbidden") {
+    return { ok: false, error: "Only an owner can archive this group", type: "forbidden" };
+  }
+  const group = resolved.group;
+  const caller = resolved.member;
+
+  if (group.status === "archived") {
+    return { ok: false, error: "Group is already archived", type: "conflict" };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.groups)
+      .set({ status: "archived", archivedAt: new Date(), updatedAt: new Date() })
+      .where(eq(schema.groups.id, group.id));
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "group",
+      entityId: group.id,
+      action: "archived",
+      summaryPayload: { summary: `${caller.displayName} archived the group` },
+    });
+  });
+
+  revalidatePath("/");
+  revalidatePath(`/g/${groupSlug}`);
+  revalidatePath(`/g/${groupSlug}/settings`);
+  return { ok: true, status: "archived" };
+}
+
+/**
+ * Restore an archived group.
+ *
+ * - Owner-only (per spec GRP-004).
+ * - Sets status='active', archived_at=null.
+ */
+export async function restoreGroupAction(groupSlug: string): Promise<GroupActionResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const resolved = await resolveOwnerMember(groupSlug, session.userId);
+  if (!resolved.group) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  if (!resolved.member || resolved.code === "forbidden") {
+    return { ok: false, error: "Only an owner can restore this group", type: "forbidden" };
+  }
+  const group = resolved.group;
+  const caller = resolved.member;
+
+  if (group.status !== "archived") {
+    return { ok: false, error: "Group is not archived", type: "conflict" };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.groups)
+      .set({ status: "active", archivedAt: null, updatedAt: new Date() })
+      .where(eq(schema.groups.id, group.id));
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "group",
+      entityId: group.id,
+      action: "restored",
+      summaryPayload: { summary: `${caller.displayName} restored the group` },
+    });
+  });
+
+  revalidatePath("/");
+  revalidatePath(`/g/${groupSlug}`);
+  revalidatePath(`/g/${groupSlug}/settings`);
+  return { ok: true, status: "active" };
 }
