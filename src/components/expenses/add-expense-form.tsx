@@ -60,8 +60,8 @@ export function AddExpenseForm({
   const [categoryId, setCategoryId] = useState("");
   const [note, setNote] = useState("");
 
-  // Payer — default to current user
-  const [payerId, setPayerId] = useState(currentUserMember.id);
+  // Multiple payers — default to current user paying full amount
+  const [payers, setPayers] = useState<Array<{ memberId: string; amountMinor: number }>>([]);
 
   // Split method
   const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
@@ -119,8 +119,47 @@ export function AddExpenseForm({
     if (!description.trim() || totalMinor <= 0) return false;
     if (!amountParsed.ok) return false;
     if (!preview) return false;
-    return true;
-  }, [description, totalMinor, amountParsed, preview]);
+    // Payer sums must match total
+    const payerSum = payers.reduce((s, p) => s + p.amountMinor, 0);
+    return payerSum === totalMinor;
+  }, [description, totalMinor, amountParsed, preview, payers]);
+
+  // Payer helpers
+  const payerTotal = payers.reduce((s, p) => s + p.amountMinor, 0);
+  const payerRemaining = totalMinor - payerTotal;
+
+  function addPayer(memberId: string) {
+    if (payers.find((p) => p.memberId === memberId)) return;
+    const remaining = totalMinor - payers.reduce((s, p) => s + p.amountMinor, 0);
+    setPayers([...payers, { memberId, amountMinor: Math.max(0, remaining) }]);
+  }
+
+  function removePayer(memberId: string) {
+    setPayers(payers.length > 1 ? payers.filter((p) => p.memberId !== memberId) : payers);
+  }
+
+  function updatePayerAmount(memberId: string, amountMinor: number) {
+    setPayers(payers.map((p) => (p.memberId === memberId ? { ...p, amountMinor } : p)));
+  }
+
+  function fillRemaining(memberId: string) {
+    const remaining = totalMinor - payers.filter((p) => p.memberId !== memberId).reduce((s, p) => s + p.amountMinor, 0);
+    updatePayerAmount(memberId, Math.max(0, remaining));
+  }
+
+  // Initialize default payer when amount changes
+  useMemo(() => {
+    if (payers.length === 0 && totalMinor > 0) {
+      setPayers([{ memberId: currentUserMember.id, amountMinor: totalMinor }]);
+    } else if (payers.length === 1 && payers[0].memberId === currentUserMember.id) {
+      // Auto-adjust single-payer amount to match total
+      if (payers[0].amountMinor !== totalMinor) {
+        setPayers([{ memberId: currentUserMember.id, amountMinor: totalMinor }]);
+      }
+    }
+  }, [totalMinor, payers, currentUserMember.id]);
+
+  const availableNonPayers = members.filter((m) => !payers.find((p) => p.memberId === m.id));
 
   // Validation messages
   const validationMessages = useMemo(() => {
@@ -188,7 +227,7 @@ export function AddExpenseForm({
         expenseDate: date,
         categoryId: categoryId || undefined,
         note: note || undefined,
-        payers: [{ memberId: payerId, amountMinor: totalMinor }],
+        payers: payers,
         split,
       });
 
@@ -251,27 +290,67 @@ export function AddExpenseForm({
           />
         </div>
 
-        {/* Paid by */}
+        {/* Multiple Payers */}
         <div className="mb-4">
-          <label className="text-sm font-medium text-[var(--text-2)] mb-2 block">Paid by</label>
-          <div className="flex items-center gap-2 flex-wrap">
-            {members.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setPayerId(m.id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-full border transition-all ${
-                  payerId === m.id
-                    ? "border-[var(--primary)] bg-[var(--positive-bg)]"
-                    : "border-[var(--border)] bg-[var(--surface)]"
-                }`}
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-[var(--text-2)]">Paid by</label>
+            {availableNonPayers.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => e.target.value && addPayer(e.target.value)}
+                className="text-xs text-[var(--primary)] bg-transparent border-none outline-none cursor-pointer"
               >
-                <Avatar name={m.displayName} colourKey={m.colourKey} size={24} />
-                <span className="text-sm font-medium">
-                  {m.id === currentUserMember.id ? "You" : m.displayName}
-                </span>
-              </button>
-            ))}
+                <option value="">+ Add payer</option>
+                {availableNonPayers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.displayName}</option>
+                ))}
+              </select>
+            )}
           </div>
+          <div className="space-y-2">
+            {payers.map((p) => {
+              const member = members.find((m) => m.id === p.memberId);
+              if (!member) return null;
+              return (
+                <div key={p.memberId} className="flex items-center gap-3 p-2 rounded-[var(--radius-sm)] hover:bg-[var(--surface)]">
+                  <Avatar name={member.displayName} colourKey={member.colourKey} size={32} />
+                  <span className="flex-1 text-sm font-medium">
+                    {member.id === currentUserMember.id ? "You" : member.displayName}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[var(--text-3)]">{group.baseCurrency === "AUD" ? "$" : ""}</span>
+                    <input
+                      type="text"
+                      value={(p.amountMinor / 100).toFixed(2)}
+                      onChange={(e) => {
+                        const val = Math.round(parseFloat(e.target.value || "0") * 100);
+                        updatePayerAmount(p.memberId, isNaN(val) ? 0 : val);
+                      }}
+                      inputMode="decimal"
+                      className="w-20 text-right text-sm font-medium tnum bg-transparent border-b border-[var(--border)] outline-none focus:border-[var(--primary)]"
+                    />
+                  </div>
+                  {payers.length > 1 && (
+                    <button onClick={() => removePayer(p.memberId)} className="text-[var(--text-3)] hover:text-[var(--danger)] p-1">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {payers.length > 1 && (
+            <div className="flex items-center justify-between mt-2 px-2 text-xs">
+              <span className={payerRemaining === 0 ? "text-[var(--success)]" : "text-[var(--warning)]"}>
+                {payerRemaining === 0 ? "✓ Payer amounts match total" : `$${Math.abs(payerRemaining / 100).toFixed(2)} ${payerRemaining > 0 ? "short" : "over"}`}
+              </span>
+              {payerRemaining !== 0 && payers.length > 0 && (
+                <button onClick={() => fillRemaining(payers[payers.length - 1].memberId)} className="text-[var(--primary)] hover:underline font-medium">
+                  Fill remaining
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Split method selector */}
@@ -364,6 +443,11 @@ export function AddExpenseForm({
                     inputMode="decimal"
                     className="w-20 text-right text-sm font-medium tnum bg-transparent border-b border-[var(--border)] outline-none focus:border-[var(--primary)]"
                   />
+                  <button onClick={() => {
+                    const used = members.filter((x) => x.id !== m.id).reduce((s, x) => s + Math.round(parseFloat(exactAmounts[x.id] || "0") * 100), 0);
+                    const remaining = totalMinor - used;
+                    setExactAmounts({ ...exactAmounts, [m.id]: (Math.max(0, remaining) / 100).toFixed(2) });
+                  }} className="text-xs text-[var(--primary)] hover:underline">Fill</button>
                 </div>
               )}
 
@@ -378,6 +462,10 @@ export function AddExpenseForm({
                     className="w-12 text-right text-sm font-medium tnum bg-transparent border-b border-[var(--border)] outline-none focus:border-[var(--primary)]"
                   />
                   <span className="text-sm text-[var(--text-3)]">%</span>
+                  <button onClick={() => {
+                    const used = members.filter((x) => x.id !== m.id).reduce((s, x) => s + parseFloat(percentages[x.id] || "0"), 0);
+                    setPercentages({ ...percentages, [m.id]: String(Math.max(0, 100 - used)) });
+                  }} className="text-xs text-[var(--primary)] hover:underline">Fill</button>
                 </div>
               )}
 

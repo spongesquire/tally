@@ -201,6 +201,9 @@ function SuggestionRow({
 }) {
   const [state, setState] = useState<"idle" | "submitting" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const router = useRouter();
 
   async function recordPayment() {
@@ -219,6 +222,8 @@ function SuggestionRow({
           fromMemberId: suggestion.fromMemberId,
           toMemberId: suggestion.toMemberId,
           amountMinor: suggestion.amountMinor,
+          settledOn: date,
+          note: note || undefined,
         }),
       });
       const data = await res.json();
@@ -268,6 +273,31 @@ function SuggestionRow({
           {state === "submitting" ? "Recording…" : "Record payment"}
         </button>
       </div>
+      {/* Settlement details (note + date) */}
+      <button
+        onClick={() => setShowDetails(!showDetails)}
+        className="text-xs text-[var(--text-3)] hover:text-[var(--text)] mt-2"
+      >
+        {showDetails ? "Hide details" : "Add note or date"}
+      </button>
+      {showDetails && (
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="px-2 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg)] border border-[var(--border)] text-xs focus:border-[var(--primary)] outline-none"
+          />
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note (e.g. PayID)"
+            maxLength={200}
+            className="px-2 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg)] border border-[var(--border)] text-xs focus:border-[var(--primary)] outline-none"
+          />
+        </div>
+      )}
     </div>
   );
 }

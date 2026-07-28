@@ -245,6 +245,220 @@ export async function saveExpenseAction(input: SaveExpenseInput): Promise<Expens
 }
 
 /**
+ * Update an existing expense with optimistic concurrency control.
+ *
+ * Per spec EXP-007: Updates include expectedVersion. The database update
+ * succeeds only when it matches the current version. On mismatch, return
+ * a typed conflict result and do NOT overwrite.
+ *
+ * Per spec SPLIT-005: Original split inputs (shares, exact amounts,
+ * percentages) are preserved and restored on edit.
+ *
+ * Per spec §10.1: Only creator or owner can edit.
+ */
+export async function updateExpenseAction(input: SaveExpenseInput & {
+  expenseId: string;
+  expectedVersion: number;
+}): Promise<ExpenseResult> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  // Get group and verify membership
+  const groups = await db
+    .select()
+    .from(schema.groups)
+    .where(eq(schema.groups.slug, input.groupSlug))
+    .limit(1);
+  if (groups.length === 0) return { ok: false, error: "Group not found", type: "not_found" };
+  const group = groups[0];
+
+  const members = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.groupId, group.id),
+        eq(schema.groupMembers.userId, session.userId),
+        eq(schema.groupMembers.status, "active")
+      )
+    )
+    .limit(1);
+  if (members.length === 0) return { ok: false, error: "Not a member", type: "forbidden" };
+  const caller = members[0];
+
+  // Get the expense
+  const expenseRows = await db
+    .select()
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, input.expenseId))
+    .limit(1);
+  if (expenseRows.length === 0) return { ok: false, error: "Expense not found", type: "not_found" };
+  const expense = expenseRows[0];
+
+  // Authorization: creator or owner only
+  const isCreator = expense.createdByMemberId === caller.id;
+  const isOwner = caller.role === "owner";
+  if (!isCreator && !isOwner) {
+    return { ok: false, error: "Only the creator or an owner can edit this expense", type: "forbidden" };
+  }
+
+  // Optimistic concurrency: check version
+  if (expense.version !== input.expectedVersion) {
+    return {
+      ok: false,
+      error: `This expense was edited by someone else. Current version is ${expense.version}; you expected ${input.expectedVersion}.`,
+      type: "conflict",
+    };
+  }
+
+  // Parse amount
+  const amountResult = parseAmountExpression(input.amountExpression);
+  if (!amountResult.ok) return { ok: false, error: amountResult.error, type: "validation" };
+  const totalMinor = toMinorUnits(amountResult.value);
+  if (totalMinor <= 0) return { ok: false, error: "Amount must be greater than zero", type: "validation" };
+
+  // Verify payer sums
+  const payerSum = input.payers.reduce((s, p) => s + p.amountMinor, 0);
+  if (payerSum !== totalMinor) {
+    const diff = totalMinor - payerSum;
+    return {
+      ok: false,
+      error: `Payer amounts are $${Math.abs(diff / 100).toFixed(2)} ${diff > 0 ? "short" : "over"}`,
+      type: "validation",
+    };
+  }
+
+  // Get all active members
+  const allMembers = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.groupId, group.id),
+        eq(schema.groupMembers.status, "active"),
+        sql`${schema.groupMembers.role} != 'viewer'`
+      )
+    )
+    .orderBy(schema.groupMembers.sortOrder);
+
+  const memberMap = new Map(allMembers.map((m) => [m.id, m]));
+
+  for (const p of input.payers) {
+    if (!memberMap.has(p.memberId)) return { ok: false, error: "Invalid payer", type: "validation" };
+  }
+
+  // Recalculate allocations
+  let allocations: Array<{ memberId: string; inputValue: number; owedMinor: number; isIncluded: boolean; allocationOrder: number }>;
+
+  if (input.split.method === "equal") {
+    allocations = allocateEqual(totalMinor, input.split.participants.map((p, i) => ({
+      memberId: p.memberId, value: p.included ? 1 : 0, sortOrder: i,
+    })));
+  } else if (input.split.method === "shares") {
+    try {
+      allocations = allocateShares(totalMinor, input.split.participants.map((p, i) => ({
+        memberId: p.memberId, value: parseFloat(p.shares) || 0, sortOrder: i,
+      })));
+    } catch (e: any) {
+      return { ok: false, error: e.message, type: "validation" };
+    }
+  } else if (input.split.method === "percentage") {
+    try {
+      allocations = allocatePercentages(totalMinor, input.split.participants.map((p, i) => ({
+        memberId: p.memberId, value: p.basisPoints, sortOrder: i,
+      })));
+    } catch (e: any) {
+      return { ok: false, error: e.message, type: "validation" };
+    }
+  } else {
+    const result = validateExactSplit(totalMinor, input.split.participants.map((p, i) => ({
+      memberId: p.memberId, value: p.amountMinor, sortOrder: i,
+    })));
+    if (!result.ok) return { ok: false, error: result.error, type: "validation" };
+    allocations = result.allocations;
+  }
+
+  const newVersion = expense.version + 1;
+
+  // Write in a transaction
+  await db.transaction(async (tx) => {
+    // Update expense header
+    await tx
+      .update(schema.expenses)
+      .set({
+        description: input.description.trim().slice(0, 120),
+        totalMinor,
+        expenseDate: input.expenseDate,
+        categoryId: input.categoryId || null,
+        note: input.note?.trim().slice(0, 2000) || null,
+        splitMethod: input.split.method,
+        version: newVersion,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.expenses.id, input.expenseId));
+
+    // Replace payers: delete old, insert new
+    await tx.delete(schema.expensePayers).where(eq(schema.expensePayers.expenseId, input.expenseId));
+    for (const p of input.payers) {
+      await tx.insert(schema.expensePayers).values({
+        expenseId: input.expenseId,
+        memberId: p.memberId,
+        paidMinor: p.amountMinor,
+      });
+    }
+
+    // Replace participants
+    await tx.delete(schema.expenseParticipants).where(eq(schema.expenseParticipants.expenseId, input.expenseId));
+    for (const a of allocations) {
+      await tx.insert(schema.expenseParticipants).values({
+        expenseId: input.expenseId,
+        memberId: a.memberId,
+        inputValue: a.inputValue.toString(),
+        owedMinor: a.owedMinor,
+        isIncluded: a.isIncluded,
+        allocationOrder: a.allocationOrder,
+      });
+    }
+
+    // Revision snapshot
+    await tx.insert(schema.entityRevisions).values({
+      groupId: group.id,
+      entityType: "expense",
+      entityId: input.expenseId,
+      version: newVersion,
+      action: "update",
+      snapshot: {
+        description: input.description,
+        totalMinor,
+        payers: input.payers,
+        split: input.split,
+        allocations,
+        previousVersion: expense.version,
+      },
+      changedByMemberId: caller.id,
+    });
+
+    // Activity event
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "expense",
+      entityId: input.expenseId,
+      action: "updated",
+      summaryPayload: {
+        summary: `${caller.displayName} edited "${input.description}" for $${(totalMinor / 100).toFixed(2)}`,
+        amount: totalMinor,
+        description: input.description,
+      },
+    });
+  });
+
+  revalidatePath(`/g/${input.groupSlug}`);
+  revalidatePath(`/g/${input.groupSlug}/expenses/${input.expenseId}`);
+  return { ok: true, expenseId: input.expenseId };
+}
+
+/**
  * Soft-delete an expense.
  *
  * - Caller must be the creator or a group owner.
