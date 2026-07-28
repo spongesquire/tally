@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Avatar, AvatarStack, netStatus, formatDateShort, formatUnsigned } from "@/components/shared/ui";
+import { CategoryIcon, SettingsIcon, SearchIcon, CloseIcon, PlusIcon, LinkIcon, CheckIcon } from "@/components/shared/icons";
 
 interface Member {
   id: string;
@@ -63,8 +64,8 @@ export function GroupOverview({
     <div className="min-h-screen">
       <div className="max-w-lg mx-auto px-5 pt-6 pb-32">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <Link href="/" className="text-sm text-[var(--text-2)] hover:text-[var(--text)]">
+        <div className="flex items-center justify-between mb-6 animate-fade-up">
+          <Link href="/" className="text-sm text-[var(--text-2)] hover:text-[var(--text)] flex items-center gap-1">
             ← Dashboard
           </Link>
           <Link
@@ -72,10 +73,7 @@ export function GroupOverview({
             className="p-2 text-[var(--text-2)] hover:text-[var(--text)] rounded-[var(--radius-sm)] hover:bg-[var(--surface-2)] transition-colors"
             aria-label="Settings"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+            <SettingsIcon size={20} />
           </Link>
         </div>
 
@@ -89,18 +87,18 @@ export function GroupOverview({
         </div>
 
         {/* Balance summary */}
-        <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] border border-[var(--border)] p-5 mb-6">
+        <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] border border-[var(--border)] p-5 mb-6 animate-fade-up" style={{ animationDelay: '50ms' }}>
           <p className="text-sm text-[var(--text-2)] mb-1">Your balance</p>
-          <p className="text-3xl font-semibold tnum" style={{ color: status.colour }}>
+          <p className="text-3xl font-semibold tnum animate-count" style={{ color: status.colour }}>
             Settled up
           </p>
           <div className="flex gap-6 mt-4 text-sm">
             <div>
-              <p className="text-[var(--text-3)]">You paid</p>
+              <p className="text-[var(--text-3)] text-xs">You paid</p>
               <p className="font-medium tnum">$0.00</p>
             </div>
             <div>
-              <p className="text-[var(--text-3)]">Your share</p>
+              <p className="text-[var(--text-3)] text-xs">Your share</p>
               <p className="font-medium tnum">$0.00</p>
             </div>
           </div>
@@ -142,24 +140,13 @@ export function GroupOverview({
         {/* Search input */}
         {expenses.length > 0 && (
           <div className="relative mb-4">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--text-3)"
-              strokeWidth="1.75"
-              className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
+            <SearchIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-3)]" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search expenses"
-              className="w-full pl-9 pr-3 py-2.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] text-sm focus:border-[var(--primary)] outline-none transition-colors"
+              className="w-full pl-9 pr-9 py-2.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] text-sm focus:border-[var(--primary)] outline-none transition-colors"
             />
             {query && (
               <button
@@ -167,9 +154,7 @@ export function GroupOverview({
                 aria-label="Clear search"
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-3)] hover:text-[var(--text)]"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
+                <CloseIcon size={14} />
               </button>
             )}
           </div>
@@ -200,21 +185,24 @@ export function GroupOverview({
           </div>
         ) : (
           <div className="space-y-2">
-            {filteredExpenses.map((exp) => (
+            {filteredExpenses.map((exp, i) => (
               <Link
                 key={exp.id}
                 href={`/g/${group.slug}/expenses/${exp.id}`}
-                className="block p-3.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
+                className="pressable block p-4 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-strong)] hover:shadow-sm transition-all animate-stagger"
+                style={{ animationDelay: `${i * 40}ms` }}
               >
                 <div className="flex items-center gap-3">
-                  {exp.categoryIcon && <span className="text-lg">{exp.categoryIcon}</span>}
+                  <div className="shrink-0 w-9 h-9 rounded-full bg-[var(--surface-2)] flex items-center justify-center text-[var(--text-2)]">
+                    <CategoryIcon iconKey={exp.categoryIcon ?? "tag"} size={18} />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{exp.description}</p>
-                    <p className="text-xs text-[var(--text-2)]">
+                    <p className="text-xs text-[var(--text-2)] mt-0.5">
                       {exp.creatorName} paid · {formatDateShort(exp.expenseDate)}
                     </p>
                   </div>
-                  <span className="text-sm font-semibold tnum">
+                  <span className="text-sm font-semibold tnum shrink-0">
                     {formatUnsigned(exp.totalMinor, exp.currency)}
                   </span>
                 </div>
@@ -227,11 +215,10 @@ export function GroupOverview({
       {/* Floating Add Expense button */}
       <Link
         href={`/g/${group.slug}/add`}
-        className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3.5 rounded-full bg-[var(--primary)] text-[var(--primary-fg)] font-medium shadow-lg hover:bg-[var(--primary-hover)] transition-all active:scale-[0.98] flex items-center gap-2 z-10"
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3.5 rounded-full bg-[var(--primary)] text-[var(--primary-fg)] font-medium shadow-lg hover:bg-[var(--primary-hover)] transition-all active:scale-[0.98] flex items-center gap-2 z-10 animate-fade-up"
+        style={{ animationDelay: '200ms' }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
+        <PlusIcon size={20} />
         Add expense
       </Link>
     </div>
@@ -304,13 +291,13 @@ function InvitePanel({
               type="text"
               value={generalLink}
               readOnly
-              className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono"
+              className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--surface-2)] border border-[var(--border)] text-xs truncate"
             />
             <button
               onClick={() => copyToClipboard(generalLink, "general")}
-              className="px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--primary-fg)] text-xs font-medium"
+              className="px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--primary-fg)] text-xs font-medium flex items-center gap-1.5"
             >
-              {copied === "general" ? "Copied ✓" : "Copy"}
+              {copied === "general" ? <><CheckIcon size={14} /> Copied</> : <><LinkIcon size={14} /> Copy</>}
             </button>
           </div>
         )}

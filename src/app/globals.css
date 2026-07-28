@@ -158,7 +158,90 @@ button:active, a:active {
   transform: scale(0.98);
 }
 
+/* ── Cursor pointer on all clickable elements ── */
+button, a, [role="button"], label[for] {
+  cursor: pointer;
+}
+
+/* ── Touch action — remove 300ms tap delay ── */
+button, a, input, textarea, select {
+  touch-action: manipulation;
+}
+
 /* ── Scrollbar (subtle) ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+/* ════════════════════════════════════════════════════════════
+   ANIMATIONS — Subtle, purposeful, respect reduced-motion
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Fade-up entrance for content ── */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 300ms var(--ease-decelerate) both;
+}
+
+/* ── Staggered entrance for list items ── */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-stagger {
+  animation: stagger-in 250ms var(--ease-decelerate) both;
+}
+
+/* ── Skeleton shimmer ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--border) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Scale on press for cards ── */
+.pressable {
+  transition: transform 150ms var(--ease-standard), border-color 150ms var(--ease-standard);
+}
+
+.pressable:active {
+  transform: scale(0.985);
+}
+
+/* ── Number transition ── */
+@keyframes count-up {
+  from { opacity: 0.6; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-count {
+  animation: count-up 400ms var(--ease-spring) both;
+}
