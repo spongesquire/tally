@@ -98,6 +98,12 @@ export async function createInvite(params: {
 
 /**
  * Accept an invite — either join as a new member (general) or claim an existing slot.
+ *
+ * For claim_member invites: if the user is already in the group as a different
+ * member, we transfer their device identity to the target member slot instead
+ * of creating a duplicate. Per spec §6.5: "links the current device profile to
+ * that existing member slot. Existing expenses remain attached to the same
+ * group-member ID."
  */
 export async function acceptInviteAction(token: string) {
   const session = await getSession();
@@ -145,6 +151,18 @@ export async function acceptInviteAction(token: string) {
       .limit(1);
     const user = users[0];
 
+    // Check if this user is already a member of this group
+    const existingMemberships = await tx
+      .select()
+      .from(schema.groupMembers)
+      .where(
+        and(
+          eq(schema.groupMembers.groupId, group.id),
+          eq(schema.groupMembers.userId, session.userId),
+          eq(schema.groupMembers.status, "active")
+        )
+      );
+
     if (invite.inviteType === "claim_member" && invite.targetMemberId) {
       // Claim an existing member slot
       const targetMembers = await tx
@@ -161,6 +179,21 @@ export async function acceptInviteAction(token: string) {
       if (targetMembers.length === 0) throw new Error("Member slot already claimed");
       const target = targetMembers[0];
 
+      // If user already has a different membership in this group, mark it as 'left'
+      // and transfer their identity to the claimed slot. Per spec §6.5, this keeps
+      // historical expenses attached to the stable group-member ID.
+      if (existingMemberships.length > 0) {
+        for (const oldMembership of existingMemberships) {
+          if (oldMembership.id !== target.id) {
+            await tx
+              .update(schema.groupMembers)
+              .set({ status: "left", updatedAt: new Date() })
+              .where(eq(schema.groupMembers.id, oldMembership.id));
+          }
+        }
+      }
+
+      // Link the user to the target member slot
       await tx
         .update(schema.groupMembers)
         .set({
@@ -183,21 +216,10 @@ export async function acceptInviteAction(token: string) {
       return { group, member: target };
     } else {
       // General invite — join as new member
-      // Check if already a member
-      const existing = await tx
-        .select()
-        .from(schema.groupMembers)
-        .where(
-          and(
-            eq(schema.groupMembers.groupId, group.id),
-            eq(schema.groupMembers.userId, session.userId),
-            eq(schema.groupMembers.status, "active")
-          )
-        )
-        .limit(1);
 
-      if (existing.length > 0) {
-        return { group, member: existing[0] };
+      // Already a member? Just redirect.
+      if (existingMemberships.length > 0) {
+        return { group, member: existingMemberships[0] };
       }
 
       // Get next sort order

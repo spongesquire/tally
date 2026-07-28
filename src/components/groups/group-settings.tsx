@@ -7,6 +7,8 @@ import {
   updateGroupAction,
   archiveGroupAction,
   restoreGroupAction,
+  removeMemberAction,
+  deleteGroupAction,
 } from "@/server/actions/groups";
 
 interface GroupData {
@@ -47,6 +49,8 @@ export function GroupSettings({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [removingMember, setRemovingMember] = useState<string | null>(null);
 
   const dirty = name !== group.name || (icon || null) !== (group.iconKey ?? null);
 
@@ -91,6 +95,29 @@ export function GroupSettings({
         return;
       }
       router.refresh();
+    });
+  }
+
+  async function handleRemoveMember(memberId: string) {
+    setError(null);
+    startTransition(async () => {
+      const res = await removeMemberAction(group.slug, memberId);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setRemovingMember(null);
+      router.refresh();
+    });
+  }
+
+  async function handleDelete() {
+    setError(null);
+    startTransition(async () => {
+      const res = await deleteGroupAction(group.slug);
+      if (!res.ok) {
+        setError(res.error);
+      }
     });
   }
 
@@ -171,9 +198,47 @@ export function GroupSettings({
                 </p>
               </div>
               <RoleBadge role={m.role} />
+              {isOwner && m.id !== currentMemberId && m.role !== "owner" && (
+                <button
+                  onClick={() => setRemovingMember(m.id)}
+                  className="p-1.5 text-[var(--text-3)] hover:text-[var(--danger)] rounded-[var(--radius-sm)] hover:bg-[var(--negative-bg)] transition-colors"
+                  aria-label={`Remove ${m.displayName}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                  </svg>
+                </button>
+              )}
             </div>
           ))}
         </div>
+
+        {/* Remove member confirmation */}
+        {removingMember && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-6" onClick={() => setRemovingMember(null)}>
+            <div className="bg-[var(--surface)] rounded-[var(--radius-lg)] p-5 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-medium text-[var(--text)] mb-1">Remove this member?</p>
+              <p className="text-xs text-[var(--text-2)] mb-4">
+                They'll be removed from the group. Any historical expenses they were part of will remain in the ledger.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleRemoveMember(removingMember)}
+                  disabled={pending}
+                  className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--danger)] text-white text-sm font-medium disabled:opacity-60"
+                >
+                  {pending ? "Removing…" : "Remove"}
+                </button>
+                <button
+                  onClick={() => setRemovingMember(null)}
+                  className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] text-sm text-[var(--text-2)] border border-[var(--border)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Lifecycle — owner only */}
@@ -240,6 +305,48 @@ export function GroupSettings({
                 >
                   {pending ? "Restoring…" : "Restore group"}
                 </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      {/* Danger zone — owner only */}
+      {isOwner && (
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)] mb-2 px-1">
+            Danger zone
+          </h2>
+          <div className="rounded-[var(--radius)] border border-[var(--danger)]/30 p-4">
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full py-2.5 rounded-[var(--radius-sm)] text-sm font-medium text-[var(--danger)] border border-[var(--border)] hover:bg-[var(--negative-bg)] transition-colors"
+              >
+                Delete group permanently
+              </button>
+            ) : (
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-1">Delete this group forever?</p>
+                <p className="text-xs text-[var(--text-2)] mb-4">
+                  This permanently removes all expenses, settlements, and history. This cannot be undone.
+                  Use "Archive" instead if you want to keep the records.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDelete}
+                    disabled={pending}
+                    className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--danger)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                  >
+                    {pending ? "Deleting…" : "Delete forever"}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={pending}
+                    className="flex-1 px-3 py-2 rounded-[var(--radius-sm)] text-sm text-[var(--text-2)] border border-[var(--border)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>

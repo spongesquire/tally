@@ -5,7 +5,8 @@ import { schema } from "@/db/client";
 import { getSession } from "@/server/auth/session";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { and, sql } from "drizzle-orm";
 import { PRODUCT, DEFAULT_CATEGORIES } from "@/lib/product-config";
 
 function slugify(name: string): string {
@@ -311,4 +312,234 @@ export async function restoreGroupAction(groupSlug: string): Promise<GroupAction
   revalidatePath(`/g/${groupSlug}`);
   revalidatePath(`/g/${groupSlug}/settings`);
   return { ok: true, status: "active" };
+}
+
+/**
+ * Remove a member from a group.
+ *
+ * Per spec MEM-005: An owner may remove a member only when the member has no
+ * active expense participation and a zero balance, or after their historical
+ * ledger identity has been explicitly merged. Does NOT cascade-delete history.
+ */
+export async function removeMemberAction(
+  groupSlug: string,
+  targetMemberId: string
+): Promise<{ ok: true } | { ok: false; error: string; type?: string }> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const resolved = await resolveOwnerMember(groupSlug, session.userId);
+  if (!resolved.group) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  if (!resolved.member || resolved.member.role !== "owner") {
+    return { ok: false, error: "Only an owner can remove members", type: "forbidden" };
+  }
+  const group = resolved.group;
+  const caller = resolved.member;
+
+  // Get the target member
+  const targetMembers = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.id, targetMemberId),
+        eq(schema.groupMembers.groupId, group.id)
+      )
+    )
+    .limit(1);
+
+  if (targetMembers.length === 0) {
+    return { ok: false, error: "Member not found", type: "not_found" };
+  }
+  const target = targetMembers[0];
+
+  // Can't remove yourself
+  if (target.id === caller.id) {
+    return { ok: false, error: "You can't remove yourself. Transfer ownership or leave the group instead.", type: "conflict" };
+  }
+
+  // Can't remove the only owner
+  if (target.role === "owner") {
+    return { ok: false, error: "Can't remove another owner. Demote them to member first.", type: "conflict" };
+  }
+
+  // Check if the member has active expenses
+  const payerCount = await db
+    .select({ id: schema.expensePayers.expenseId })
+    .from(schema.expensePayers)
+    .innerJoin(schema.expenses, eq(schema.expenses.id, schema.expensePayers.expenseId))
+    .where(
+      and(
+        eq(schema.expensePayers.memberId, targetMemberId),
+        eq(schema.expenses.status, "active")
+      )
+    )
+    .limit(1);
+
+  const participantCount = await db
+    .select({ id: schema.expenseParticipants.expenseId })
+    .from(schema.expenseParticipants)
+    .innerJoin(schema.expenses, eq(schema.expenses.id, schema.expenseParticipants.expenseId))
+    .where(
+      and(
+        eq(schema.expenseParticipants.memberId, targetMemberId),
+        eq(schema.expenses.status, "active"),
+        eq(schema.expenseParticipants.owedMinor, sql` > 0`)
+      )
+    )
+    .limit(1);
+
+  if (payerCount.length > 0 || participantCount.length > 0) {
+    return {
+      ok: false,
+      error: "This member has active expenses. Settle or remove expenses first.",
+      type: "conflict",
+    };
+  }
+
+  // Soft-remove: set status to 'left'
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.groupMembers)
+      .set({ status: "left", updatedAt: new Date() })
+      .where(eq(schema.groupMembers.id, targetMemberId));
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "member",
+      entityId: targetMemberId,
+      action: "removed",
+      summaryPayload: { summary: `${target.displayName} was removed from the group` },
+    });
+  });
+
+  revalidatePath(`/g/${groupSlug}`);
+  revalidatePath(`/g/${groupSlug}/settings`);
+  return { ok: true };
+}
+
+/**
+ * Permanently delete a group and all its data.
+ *
+ * This is a destructive action for groups with no expenses or when the owner
+ * wants to start fresh. For groups with history, prefer archive.
+ */
+export async function deleteGroupAction(
+  groupSlug: string
+): Promise<{ ok: true } | { ok: false; error: string; type?: string }> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  const resolved = await resolveOwnerMember(groupSlug, session.userId);
+  if (!resolved.group) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  if (!resolved.member || resolved.member.role !== "owner") {
+    return { ok: false, error: "Only an owner can delete a group", type: "forbidden" };
+  }
+  const group = resolved.group;
+
+  // Hard delete everything in the group (cascade)
+  await db.transaction(async (tx) => {
+    // Delete child rows first
+    await tx.delete(schema.activityEvents).where(eq(schema.activityEvents.groupId, group.id));
+    await tx.delete(schema.entityRevisions).where(eq(schema.entityRevisions.groupId, group.id));
+    await tx.delete(schema.settlementAllocations);
+    await tx.delete(schema.settlements).where(eq(schema.settlements.groupId, group.id));
+    await tx.delete(schema.expenseParticipants);
+    await tx.delete(schema.expensePayers);
+    await tx.delete(schema.expenses).where(eq(schema.expenses.groupId, group.id));
+    await tx.delete(schema.recurringRules).where(eq(schema.recurringRules.groupId, group.id));
+    await tx.delete(schema.groupInvites).where(eq(schema.groupInvites.groupId, group.id));
+    await tx.delete(schema.categories).where(eq(schema.categories.groupId, group.id));
+    await tx.delete(schema.groupMembers).where(eq(schema.groupMembers.groupId, group.id));
+    await tx.delete(schema.groups).where(eq(schema.groups.id, group.id));
+  });
+
+  revalidatePath("/");
+  redirect("/");
+}
+
+/**
+ * Leave a group as the current user.
+ *
+ * Per spec GRP-005: A member may leave only when they're not the sole owner
+ * and their net balance is zero.
+ */
+export async function leaveGroupAction(
+  groupSlug: string
+): Promise<{ ok: true } | { ok: false; error: string; type?: string }> {
+  const session = await getSession();
+  if (!session) redirect("/");
+
+  // Use a regular member resolver (not owner-only) for leave
+  const groups = await db
+    .select()
+    .from(schema.groups)
+    .where(eq(schema.groups.slug, groupSlug))
+    .limit(1);
+  if (groups.length === 0) {
+    return { ok: false, error: "Group not found", type: "not_found" };
+  }
+  const group = groups[0];
+
+  const members = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(
+      and(
+        eq(schema.groupMembers.groupId, group.id),
+        eq(schema.groupMembers.userId, session.userId),
+        eq(schema.groupMembers.status, "active")
+      )
+    )
+    .limit(1);
+  if (members.length === 0) {
+    return { ok: false, error: "You're not a member of this group", type: "forbidden" };
+  }
+  const caller = members[0];
+
+  // Check if sole owner
+  if (caller.role === "owner") {
+    const otherOwners = await db
+      .select({ id: schema.groupMembers.id })
+      .from(schema.groupMembers)
+      .where(
+        and(
+          eq(schema.groupMembers.groupId, group.id),
+          eq(schema.groupMembers.role, "owner"),
+          eq(schema.groupMembers.status, "active"),
+          sql`${schema.groupMembers.id} != ${caller.id}`
+        )
+      );
+    if (otherOwners.length === 0) {
+      return {
+        ok: false,
+        error: "You're the only owner. Promote another member or delete the group instead.",
+        type: "conflict",
+      };
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.groupMembers)
+      .set({ status: "left", updatedAt: new Date() })
+      .where(eq(schema.groupMembers.id, caller.id));
+
+    await tx.insert(schema.activityEvents).values({
+      groupId: group.id,
+      actorMemberId: caller.id,
+      entityType: "member",
+      entityId: caller.id,
+      action: "left",
+      summaryPayload: { summary: `${caller.displayName} left the group` },
+    });
+  });
+
+  revalidatePath("/");
+  redirect("/");
 }

@@ -262,10 +262,33 @@ function InvitePanel({
     }
   }
 
-  function copyToClipboard(text: string, id: string) {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
+  async function copyToClipboard(text: string, id: string) {
+    try {
+      // Try modern clipboard API first (requires HTTPS or localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback: use a temporary textarea + execCommand
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      // Last resort: select the input so user can manually copy
+      const input = document.querySelector(`input[value="${text}"]`) as HTMLInputElement;
+      if (input) {
+        input.select();
+      }
+      setCopied(id);
+      setTimeout(() => setCopied(null), 3000);
+    }
   }
 
   const unclaimed = members.filter((m) => !m.userId && m.status === "active");
